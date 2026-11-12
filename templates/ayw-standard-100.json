@@ -1,0 +1,178 @@
+{
+  "id": "ayw-standard-100",
+  "name": "กระดาษคำตอบโรงเรียนอยุธยาวิทยาลัย (100 ข้อ)",
+  "canonical": {
+    "width": 2000,
+    "height": 1360
+  },
+  "source": {
+    "file": "Sample/Answer sheet.pdf",
+    "note": "วัดอัตโนมัติจากภาพสแกน iPhone 2146×1443 px; canonical ยึดตามสิ่งพิมพ์ (ตารางวง) ไม่ใช่ขอบกระดาษ",
+    "measuredAt": "2026-11-12",
+    "calibration": "studentId, subjectCode และแถบ timing ปรับเทียบจากภาพถ่ายจริง 5 แผ่น (tools/calibrate-template.js) โดยยึดบล็อกคำตอบเป็นกรอบอ้างอิง"
+  },
+  "anchors": {
+    "type": "timing-track+frame",
+    "cornerSquare": {
+      "x": 0.048393,
+      "y": 0.896441,
+      "w": 0.015,
+      "h": 0.020588
+    },
+    "timingTrack": {
+      "y": 0.940773,
+      "xStart": 0.053685,
+      "xEnd": 0.941851,
+      "barCount": 49,
+      "barW": 0.006,
+      "barH": 0.022794
+    },
+    "frameTopLeft": {
+      "x": 0.405478,
+      "y": 0.1307
+    },
+    "frameTopRight": {
+      "x": 0.914908,
+      "y": 0.13083
+    }
+  },
+  "bubbleRadius": 0.00675,
+  "inkDropChannel": "blue",
+  "fields": [
+    {
+      "key": "studentId",
+      "type": "digits",
+      "columns": 5,
+      "rows": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ],
+      "origin": {
+        "x": 0.12815,
+        "y": 0.608788
+      },
+      "dx": 0.01835,
+      "dy": 0.027087,
+      "groupSize": 0,
+      "groupGap": 0,
+      "barStart": 4
+    },
+    {
+      "key": "subjectCode",
+      "type": "code",
+      "columns": [
+        {
+          "rows": [
+            "ท",
+            "ค",
+            "ว",
+            "ส",
+            "พ",
+            "ศ",
+            "ง",
+            "อ",
+            "ฝ",
+            "จ",
+            "ญ"
+          ]
+        },
+        {
+          "rows": "0-9"
+        },
+        {
+          "rows": "0-9"
+        },
+        {
+          "rows": "0-9"
+        },
+        {
+          "rows": "0-9"
+        },
+        {
+          "rows": "0-9"
+        }
+      ],
+      "origin": {
+        "x": 0.256607,
+        "y": 0.608503
+      },
+      "dx": 0.018539,
+      "dy": 0.027264,
+      "groupSize": 0,
+      "groupGap": 0,
+      "barStart": 11
+    },
+    {
+      "key": "answers",
+      "type": "mcq",
+      "choices": 5,
+      "labels": {
+        "num": "12345",
+        "th": "กขคงจ",
+        "en": "ABCDE"
+      },
+      "blocks": [
+        {
+          "from": 1,
+          "to": 25,
+          "origin": {
+            "x": 0.442594,
+            "y": 0.227241
+          },
+          "dx": 0.018331,
+          "dy": 0.027197,
+          "groupSize": 0,
+          "groupGap": 0,
+          "barStart": 21
+        },
+        {
+          "from": 26,
+          "to": 50,
+          "origin": {
+            "x": 0.570812,
+            "y": 0.227478
+          },
+          "dx": 0.018501,
+          "dy": 0.027203,
+          "groupSize": 0,
+          "groupGap": 0,
+          "barStart": 28
+        },
+        {
+          "from": 51,
+          "to": 75,
+          "origin": {
+            "x": 0.700184,
+            "y": 0.22729
+          },
+          "dx": 0.018612,
+          "dy": 0.027249,
+          "groupSize": 0,
+          "groupGap": 0,
+          "barStart": 35
+        },
+        {
+          "from": 76,
+          "to": 100,
+          "origin": {
+            "x": 0.830409,
+            "y": 0.226857
+          },
+          "dx": 0.018728,
+          "dy": 0.027321,
+          "groupSize": 0,
+          "groupGap": 0,
+          "barStart": 42
+        }
+      ]
+    }
+  ]
+}

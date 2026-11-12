@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ทดสอบเอนจินสแกน · OMR AYW</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #FFFFFF; --bg2: #F5F5F4; --fg: #111111; --fg2: #6B6B6B; --line: #E5E5E5;
+    --ok: #15803D; --bad: #DC2626; --warn: #CA8A04; --chk: #EA580C;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 16px/1.5 "IBM Plex Sans Thai", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; font-weight: 700; }
+  header span { color: var(--fg2); font-size: 14px; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+  #stage { position: relative; background: var(--bg2); overflow: auto; min-height: 0; }
+  #cv { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg2); text-align: center; padding: 24px; }
+  aside { border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg2); margin: 0 0 8px; font-weight: 500; }
+  .btn { font: inherit; font-size: 15px; min-height: 48px; padding: 8px 14px; border: 1px solid var(--fg); background: var(--fg); color: var(--bg);
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 100%; }
+  input[type=file] { display: none; }
+  textarea { font: 16px/1.4 "IBM Plex Sans Thai", monospace; width: 100%; min-height: 72px; padding: 8px 10px; border: 1px solid var(--line); resize: vertical; letter-spacing: .05em; }
+  textarea:focus { outline: 2px solid var(--fg); outline-offset: -1px; }
+  .note { font-size: 13px; color: var(--fg2); margin: 6px 0 0; }
+  .cards { display: flex; flex-direction: column; gap: 8px; }
+  .card { border: 1px solid var(--line); padding: 10px 12px; cursor: pointer; background: var(--bg); text-align: left; font: inherit; color: inherit; }
+  .card.active { border-color: var(--fg); box-shadow: inset 4px 0 0 var(--fg); }
+  .card .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .card .name { font-size: 13px; color: var(--fg2); }
+  .card .score { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .card .ids { font-variant-numeric: tabular-nums; font-weight: 500; }
+  .card .err { color: var(--bad); font-size: 14px; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 6px; border: 1px solid currentColor; margin: 4px 4px 0 0; }
+  .t-chk { color: var(--chk); } .t-ok { color: var(--ok); } .t-warn { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  td, th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { font-weight: 500; color: var(--fg2); font-size: 12px; }
+  .s-ok { color: var(--ok); } .s-bad { color: var(--bad); } .s-blank { color: var(--warn); } .s-chk { color: var(--chk); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--fg2); }
+  .legend b { font-weight: 700; }
+  main > * { min-width: 0; }
+  @media (max-width: 820px) {
+    main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+    #stage { min-height: 0; }
+    #stage:has(#empty:not([style*="none"])) { min-height: 40vh; }
+    aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+    html, body { height: auto; }
+  }
+</style>
+</head>
+<body>
+<header><h1>ทดสอบเอนจินสแกน</h1><span>OMR AYW · Phase 2</span></header>
+<main>
+  <div id="stage"><canvas id="cv"></canvas><div id="empty">เลือกภาพถ่ายกระดาษคำตอบที่ฝนแล้ว (เลือกหลายภาพได้)</div></div>
+  <aside>
+    <section>
+      <label class="btn" for="file">เลือกภาพ</label>
+      <input type="file" id="file" accept="image/*" multiple>
+      <p class="note">ประมวลผลในเครื่องทั้งหมด ไม่มีการส่งภาพออกไป · Chrome เปิดไฟล์ HEIC ไม่ได้ ให้ใช้ JPG หรือเปิดใน Safari</p>
+    </section>
+    <section>
+      <h2>เฉลย (ไม่บังคับ)</h2>
+      <textarea id="key" placeholder="เช่น BDABBBACCA… หรือ ขงกขข… หรือ 24122…" spellcheck="false" autocomplete="off"></textarea>
+      <p class="note" id="keyInfo">ใส่เฉลยแล้วจะคิดคะแนนเฉพาะข้อตามความยาวของเฉลย</p>
+    </section>
+    <section>
+      <h2>ผล</h2>
+      <div class="legend"><span class="s-ok"><b>✓</b> ถูก</span><span class="s-bad"><b>✗</b> ผิด</span><span class="s-blank"><b>–</b> ไม่ตอบ</span><span class="s-chk"><b>!</b> ต้องตรวจ</span></div>
+      <div class="cards" id="cards" style="margin-top:8px"></div>
+    </section>
+    <section id="detail"></section>
+  </aside>
+</main>
+
+<script src="js/geom.js"></script>
+<script src="js/template.js"></script>
+<script src="js/scan.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const C = { ok: '#15803D', bad: '#DC2626', blank: '#CA8A04', chk: '#EA580C', ink: '#111111' };
+const LET = 'ABCDE', TH = 'กขคงจ';
+let tpl = null;
+const items = []; // {name, bitmap, result}
+let active = -1;
+
+fetch('templates/ayw-standard-100.json').then(r => r.json()).then(t => { tpl = t; })
+  .catch(() => { $('#empty').textContent = 'โหลด template ไม่ได้ ต้องเปิดผ่านเว็บเซิร์ฟเวอร์ (เช่น GitHub Pages หรือ python3 -m http.server) ไม่ใช่ดับเบิลคลิกไฟล์'; });
+
+function parseKey() {
+  const raw = $('#key').value.replace(/[\s,]/g, '').toUpperCase();
+  const key = [];
+  for (const ch of raw) {
+    let i = LET.indexOf(ch); if (i < 0) i = TH.indexOf(ch); if (i < 0 && /[1-5]/.test(ch)) i = +ch - 1;
+    key.push(i >= 0 ? i : null);
+  }
+  return key;
+}
+
+function grade(r, key) {
+  if (!key.length) return null;
+  let score = 0;
+  const rows = key.map((k, i) => {
+    const a = r.answers[i];
+    let s;
+    if (a.status === 'blank') s = 'blank';
+    else if (a.status !== 'ok') s = 'chk';
+    else s = a.choice === k ? 'ok' : 'bad';
+    if (s === 'ok') score++;
+    return { q: i + 1, a, k, s };
+  });
+  return { score, total: key.length, rows };
+}
+
+function summary(r) {
+  const issues = r.answers.filter(a => a.status === 'multi' || a.status === 'uncertain').length;
+  const erased = r.answers.filter(a => a.note === 'erased').length;
+  return { issues, erased };
+}
+
+async function onFiles(files) {
+  if (!tpl) return;
+  $('#empty').textContent = 'กำลังอ่าน…';
+  for (const f of files) {
+    let bitmap;
+    try { bitmap = await createImageBitmap(f, { imageOrientation: 'from-image' }); }
+    catch (e) { items.push({ name: f.name, result: { ok: false, error: 'เปิดภาพไม่ได้ (' + e.message + ')' } }); renderCards(); continue; }
+    // phone photos are 12 MP: read at ≤ 2600 px on the long side (plenty for the bubbles, far less memory)
+    const f2 = Math.min(1, 2600 / Math.max(bitmap.width, bitmap.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bitmap.width * f2); c.height = Math.round(bitmap.height * f2);
+    const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+    if (f2 < 1) bitmap = await createImageBitmap(c);
+    const img = ctx.getImageData(0, 0, c.width, c.height);
+    await new Promise(r => setTimeout(r, 0));
+    const result = OMRScan.scanSheet(img, tpl);
+    items.push({ name: f.name, bitmap, result });
+    if (active < 0) active = items.length - 1;
+    renderCards(); if (active === items.length - 1) show(active);
+  }
+  $('#empty').style.display = items.some(i => i.bitmap) ? 'none' : '';
+}
+
+function renderCards() {
+  const key = parseKey();
+  $('#cards').innerHTML = items.map((it, i) => {
+    const r = it.result;
+    if (!r.ok) return `<button class="card ${i === active ? 'active' : ''}" data-i="${i}"><div class="name">${esc(it.name)}</div><div class="err">✗ ${esc(r.error)}</div></button>`;
+    const g = grade(r, key), s = summary(r);
+    const id = r.studentId.value || r.studentId.partial, code = r.subjectCode.value || r.subjectCode.partial;
+    return `<button class="card ${i === active ? 'active' : ''}" data-i="${i}">
+      <div class="top"><span class="ids">${esc(id)} · ${esc(code)}</span><span class="score">${g ? g.score + '<small style="font-size:16px;color:var(--fg2)">/' + g.total + '</small>' : ''}</span></div>
+      <div class="name">${esc(it.name)} · ${Math.round(r.timing.total)} ms</div>
+      ${r.studentId.status !== 'ok' ? '<span class="tag t-chk">! เลขประจำตัว</span>' : ''}
+      ${r.subjectCode.status !== 'ok' ? '<span class="tag t-chk">! รหัสวิชา</span>' : ''}
+      ${s.issues ? `<span class="tag t-chk">! ต้องตรวจ ${s.issues} ข้อ</span>` : ''}
+      ${s.erased ? `<span class="tag t-warn">รอยลบ ${s.erased} ข้อ</span>` : ''}
+    </button>`;
+  }).join('');
+}
+
+function show(i) {
+  active = i; renderCards();
+  const it = items[i]; if (!it || !it.bitmap) { $('#detail').innerHTML = ''; return; }
+  const r = it.result, cv = $('#cv'), ctx = cv.getContext('2d');
+  cv.width = it.bitmap.width; cv.height = it.bitmap.height;
+  ctx.drawImage(it.bitmap, 0, 0);
+  if (!r.ok) { $('#detail').innerHTML = ''; return; }
+  const key = parseKey(), g = grade(r, key);
+  const rad = r.debug.radiusImg, lw = Math.max(2, rad * 0.18);
+  const ring = (b, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.arc(b.x, b.y, rad * 1.15, 0, 2 * Math.PI); ctx.stroke(); };
+  const byQ = {};
+  for (const b of r.debug.bubbles) if (b.field === 'answers') (byQ[b.q] = byQ[b.q] || [])[b.choice] = b;
+  // ID / subject code
+  for (const fld of ['studentId', 'subjectCode']) {
+    const res = r[fld], bs = r.debug.bubbles.filter(b => b.field === fld);
+    res.cols.forEach((col, c) => {
+      const colB = bs.filter(b => b.col === c);
+      if (col.status === 'ok') { const b = colB.find(x => x.row === col.dark.indexOf(Math.max(...col.dark))); if (b) ring(b, C.ok, lw); }
+      else colB.forEach(b => ring(b, C.chk, lw * 0.6));
+    });
+  }
+  // answers
+  const n = g ? g.total : Math.max(0, ...r.answers.filter(a => a.status !== 'blank').map(a => a.q));
+  ctx.font = `bold ${Math.round(rad * 1.6)}px "IBM Plex Sans Thai", sans-serif`; ctx.textBaseline = 'middle';
+  for (let q = 1; q <= n; q++) {
+    const a = r.answers[q - 1], row = byQ[q]; if (!row) continue;
+    let color, sym;
+    if (g) {
+      const s = g.rows[q - 1].s; color = C[s]; sym = { ok: '✓', bad: '✗', blank: '–', chk: '!' }[s];
+      if (s === 'bad' || s === 'blank') { const k = g.rows[q - 1].k; if (k != null && row[k]) ring(row[k], C.ok, lw * 0.5); }
+    } else { color = a.status === 'ok' ? C.ink : a.status === 'blank' ? C.blank : C.chk; sym = a.status === 'ok' ? '' : a.status === 'blank' ? '–' : '!'; }
+    if (a.status === 'ok') ring(row[a.choice], color, lw);
+    else if (a.status === 'multi') a.choices.forEach(c => ring(row[c], C.chk, lw));
+    else if (a.status === 'uncertain') row.forEach(b => ring(b, C.chk, lw * 0.6));
+    if (sym) { ctx.fillStyle = color; ctx.fillText(sym, row[4].x + rad * 1.8, row[4].y); }
+  }
+  // detail table
+  const rows = [];
+  for (let q = 1; q <= n; q++) {
+    const a = r.answers[q - 1], gr = g && g.rows[q - 1];
+    const ans = a.status === 'ok' ? LET[a.choice] : a.status === 'multi' ? a.choices.map(c => LET[c]).join('+') : a.status === 'blank' ? '–' : '?';
+    const cls = gr ? 's-' + gr.s : (a.status === 'ok' ? '' : a.status === 'blank' ? 's-blank' : 's-chk');
+    const st = gr ? { ok: '✓', bad: '✗', blank: '–', chk: '!' }[gr.s] : (a.status === 'ok' ? '' : '!');
+    const note = a.status === 'multi' ? 'ฝนซ้อน' : a.status === 'uncertain' ? (a.reason === 'faint' ? 'ฝนจาง' : 'ไม่ชัด') : a.note === 'erased' ? 'มีรอยลบ' : '';
+    rows.push(`<tr><td>${q}</td><td class="${cls}"><b>${st}</b> ${ans}</td><td>${gr && gr.k != null ? LET[gr.k] : ''}</td><td>${Math.round(Math.max(...a.dark) * 100)}</td><td style="color:var(--fg2)">${note}</td></tr>`);
+  }
+  $('#detail').innerHTML = `<h2>${esc(it.name)}</h2>
+    <p style="margin:0 0 8px">เลขประจำตัว <b class="num">${esc(r.studentId.value || r.studentId.partial)}</b> · รหัสวิชา <b>${esc(r.subjectCode.value || r.subjectCode.partial)}</b>${g ? ` · คะแนน <b>${g.score}/${g.total}</b>` : ''}</p>
+    <p class="note" style="margin:0 0 8px">เกณฑ์ความมืด ${Math.round(r.threshold * 100)} · ใช้เวลา ${Math.round(r.timing.total)} ms${r.rotated ? ' · ภาพกลับหัว' : ''}</p>
+    <table><thead><tr><th>ข้อ</th><th>ตอบ</th><th>เฉลย</th><th>ความมืด</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+$('#file').addEventListener('change', e => { const f = [...e.target.files]; e.target.value = ''; onFiles(f); });
+$('#cards').addEventListener('click', e => { const b = e.target.closest('.card'); if (b) show(+b.dataset.i); });
+$('#key').addEventListener('input', () => {
+  const k = parseKey(), bad = k.filter(x => x == null).length;
+  $('#keyInfo').textContent = k.length ? `เฉลย ${k.length} ข้อ${bad ? ` · อ่านไม่ได้ ${bad} ตัว` : ''}` : 'ใส่เฉลยแล้วจะคิดคะแนนเฉพาะข้อตามความยาวของเฉลย';
+  if (active >= 0) show(active); else renderCards();
+});
+</script>
+</body>
+</html>
