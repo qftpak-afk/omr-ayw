@@ -142,7 +142,7 @@ async function onFiles(files) {
     const img = ctx.getImageData(0, 0, c.width, c.height);
     await new Promise(r => setTimeout(r, 0));
     const result = OMRScan.scanSheet(img, tpl);
-    items.push({ name: f.name, bitmap, result });
+    items.push({ name: f.name, file: f, bitmap, result });
     if (active < 0) active = items.length - 1;
     renderCards(); if (active === items.length - 1) show(active);
   }
@@ -173,7 +173,21 @@ function show(i) {
   const r = it.result, cv = $('#cv'), ctx = cv.getContext('2d');
   cv.width = it.bitmap.width; cv.height = it.bitmap.height;
   ctx.drawImage(it.bitmap, 0, 0);
-  if (!r.ok) { $('#detail').innerHTML = ''; return; }
+  if (!r.ok) {
+    // show what the engine did find, so a failed photo can be diagnosed from a screenshot
+    const d = r.debug || {}, u = Math.max(cv.width, cv.height) / 400;
+    if (d.paperCorners) {
+      ctx.strokeStyle = C.chk; ctx.lineWidth = u; ctx.beginPath();
+      d.paperCorners.forEach((p, k) => (k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.stroke();
+    }
+    if (d.imgBars) { ctx.fillStyle = '#C026D3'; for (const [x, y] of d.imgBars) ctx.fillRect(x - u, y - 4 * u, 2 * u, 8 * u); }
+    $('#detail').innerHTML = `<h2>${esc(it.name)}</h2>
+      <p class="s-bad" style="margin:0 0 8px">✗ ${esc(r.error)}</p>
+      <p class="note" style="margin:0 0 12px">เส้นส้ม = ขอบกระดาษที่หาได้ · ขีดม่วง = แถบ timing ที่หาได้ (${d.imgBars ? d.imgBars.length : 0}/49)</p>
+      <button class="btn" id="share">ส่งภาพนี้ให้ผู้พัฒนา (AirDrop / แชร์)</button>`;
+    $('#share').onclick = () => shareFile(it);
+    return;
+  }
   const key = parseKey(), g = grade(r, key);
   const rad = r.debug.radiusImg, lw = Math.max(2, rad * 0.18);
   const ring = (b, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.arc(b.x, b.y, rad * 1.15, 0, 2 * Math.PI); ctx.stroke(); };
@@ -216,7 +230,18 @@ function show(i) {
   $('#detail').innerHTML = `<h2>${esc(it.name)}</h2>
     <p style="margin:0 0 8px">เลขประจำตัว <b class="num">${esc(r.studentId.value || r.studentId.partial)}</b> · รหัสวิชา <b>${esc(r.subjectCode.value || r.subjectCode.partial)}</b>${g ? ` · คะแนน <b>${g.score}/${g.total}</b>` : ''}</p>
     <p class="note" style="margin:0 0 8px">เกณฑ์ความมืด ${Math.round(r.threshold * 100)} · ใช้เวลา ${Math.round(r.timing.total)} ms${r.rotated ? ' · ภาพกลับหัว' : ''}</p>
+    <button class="btn" id="share" style="background:#FFFFFF;color:var(--fg);margin-bottom:12px">ส่งภาพนี้ให้ผู้พัฒนา (AirDrop / แชร์)</button>
     <table><thead><tr><th>ข้อ</th><th>ตอบ</th><th>เฉลย</th><th>ความมืด</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  $('#share').onclick = () => shareFile(it);
+}
+
+async function shareFile(it) {
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [it.file] })) { await navigator.share({ files: [it.file], title: it.name }); return; }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  // fallback: download the original file
+  const a = document.createElement('a'); a.href = URL.createObjectURL(it.file); a.download = it.name || 'sheet.jpg';
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

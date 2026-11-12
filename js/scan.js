@@ -176,7 +176,7 @@
       const asp = c.h / c.w;
       return c.area > 0.25 * bw * bh && c.area < 4 * bw * bh && asp > 1.4 && asp < 5.5 && c.h > 0.5 * bh && c.h < 2 * bh;
     });
-    if (cand.length < N * 0.6) return { ok: false, found: cand.length, error: `พบแถบ timing ${cand.length}/${N} แท่ง` };
+    if (cand.length < N * 0.6) return { ok: false, found: cand.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${cand.length}/${N} แท่ง) ให้แถบดำทั้งแถวอยู่ในภาพ` };
     // largest group on one horizontal line
     let best = [];
     for (const s of cand) {
@@ -211,12 +211,12 @@
       }
     }
     if (shift == null) {
-      if (best.length !== N) return { ok: false, found: best.length, error: `พบแถบ timing ${best.length}/${N} แท่ง (ต้องเห็นแถบครบทั้งแถว)` };
+      if (best.length !== N) return { ok: false, found: best.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${best.length}/${N} แท่ง) ให้แถบดำทั้งแถวอยู่ในภาพ` };
       shift = 0;
     }
     const bars = [], index = [];
     best.forEach((c, i) => { const k = idx[i] + shift; if (k >= 0 && k < N) { bars.push([c.cx, c.cy + y0]); index.push(k); } });
-    if (bars.length < 0.8 * N) return { ok: false, found: bars.length, error: `พบแถบ timing ${bars.length}/${N} แท่ง` };
+    if (bars.length < 0.8 * N) return { ok: false, found: bars.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${bars.length}/${N} แท่ง) ให้แถบดำทั้งแถวอยู่ในภาพ` };
     return { ok: true, bars, index, square, barSize: [bw, bh] };
   }
 
@@ -276,7 +276,7 @@
     return (lagLo + k + off) / pitch;
   }
 
-  function register(pf, tpl, sim, simScale, opt) {
+  function register(pf, tpl, sim, simScale, opt, barsPF) {
     const S = makeSampler(pf);
     const Wc = tpl.canonical.width, Hc = tpl.canonical.height;
     const rp = tpl.bubbleRadius * Wc * simScale;
@@ -309,21 +309,27 @@
       }
       b.mx = b.ex + ox; b.my = b.ey + oy; b.ring = bs;
     };
-    for (const g of Object.values(groups)) {
+    // trusted = the prediction already carries the sheet's perspective (pass ≥ 2): keep using it for every
+    // chunk and only carry the last chunk's offset, instead of extrapolating an affine fit upwards
+    const trackGroup = (g, predict, firstWin, trusted) => {
       const rowsDesc = [...new Set(g.map(rowOf))].sort((a, b) => b - a);
       const found = [];
-      let model = null;
+      let model = null, carry = [0, 0];
       for (let k = 0; k < rowsDesc.length; k += opt.chunkRows) {
         const rows = new Set(rowsDesc.slice(k, k + opt.chunkRows));
         const chunk = g.filter(b => rows.has(rowOf(b)));
-        for (const b of chunk) { const p = model ? G.applyH(model, b.cx, b.cy) : [b.px, b.py]; b.ex = p[0]; b.ey = p[1]; }
-        const W = k === 0 ? opt.searchFirst : opt.searchNext;
+        for (const b of chunk) {
+          const p = trusted ? predict(b) : (model ? G.applyH(model, b.cx, b.cy) : predict(b));
+          b.ex = p[0] + (trusted ? carry[0] : 0); b.ey = p[1] + (trusted ? carry[1] : 0);
+        }
+        const W = k === 0 ? firstWin : opt.searchNext;
         let best = -Infinity, sx = 0, sy = 0;
         for (let dy = -W; dy <= W; dy++) for (let dx = -W; dx <= W; dx++) {
           let s = 0; for (const b of chunk) s += S.ringScore(b.ex + dx, b.ey + dy, rp);
           if (s > best) { best = s; sx = dx; sy = dy; }
         }
         if (k === 0) g.shift = [sx, sy];
+        carry = [carry[0] + sx, carry[1] + sy];
         for (const b of chunk) { b.ex += sx; b.ey += sy; refine(b, 2); b.filledGuess = filledAt(b); }
         const cm = percentile(chunk.map(b => b.ring), 0.5);
         for (const b of chunk) if (!b.filledGuess && b.ring > 0.4 * cm) found.push(b);
@@ -339,27 +345,14 @@
         const Hb = G.homographyLS(gg.map(b => [b.cx, b.cy]), gg.map(b => [b.mx, b.my]));
         for (const b of g) { const p = G.applyH(Hb, b.cx, b.cy); b.ex = p[0]; b.ey = p[1]; refine(b, win); }
       }
-    }
-
-    // robust global homography canonical → PF
-    const med = percentile(bubbles.map(b => b.ring), 0.5);
-    let good = bubbles.filter(b => !b.filledGuess && b.ring > 0.4 * med);
-    if (good.length < 40) return { error: 'จับตำแหน่งวงไม่ได้ (ภาพเบลอหรือมืดเกินไป)' };
-    let Hg = G.homographyLS(good.map(b => [b.cx, b.cy]), good.map(b => [b.mx, b.my]));
-    for (let it = 0; it < 2; it++) {
-      good = good.filter(b => { const p = G.applyH(Hg, b.cx, b.cy); return Math.hypot(p[0] - b.mx, p[1] - b.my) < 2.5; });
-      Hg = G.homographyLS(good.map(b => [b.cx, b.cy]), good.map(b => [b.mx, b.my]));
-    }
-    const rms = pts => Math.sqrt(pts.reduce((s, b) => { const p = G.applyH(b.H || Hg, b.cx, b.cy); return s + (p[0] - b.mx) ** 2 + (p[1] - b.my) ** 2; }, 0) / Math.max(1, pts.length));
-    const globalRms = rms(good);
+    };
 
     // per-block homography from the block's own rings (handles paper curl and template scale error);
-    // fall back to global. verifyGrid() below is the safety net against a slipped grid.
-    const blockInfo = {};
-    for (const [key, g] of Object.entries(groups)) {
+    // fall back to the given global one. verifyGrid() is the safety net against a slipped grid.
+    const finalize = (key, g, Hfall) => {
       const gm = percentile(g.map(b => b.ring), 0.5);
       let gg = g.filter(b => !b.filledGuess && b.ring > 0.4 * gm);
-      let H = Hg, used = 'global';
+      let H = Hfall, used = 'global';
       if (gg.length >= Math.max(8, 0.3 * g.length)) {
         let Hb = G.homographyLS(gg.map(b => [b.cx, b.cy]), gg.map(b => [b.mx, b.my]));
         const err = b => { const p = G.applyH(Hb, b.cx, b.cy); return Math.hypot(p[0] - b.mx, p[1] - b.my); };
@@ -367,12 +360,74 @@
         if (kept.length >= 8 && kept.length < gg.length) { gg = kept; Hb = G.homographyLS(gg.map(b => [b.cx, b.cy]), gg.map(b => [b.mx, b.my])); }
         const e = Math.sqrt(gg.reduce((s, b) => s + err(b) ** 2, 0) / gg.length);
         if (e < 1.5) { H = Hb; used = 'block'; }
-      } else {
-        gg = good.filter(b => b.group === key);
       }
       for (const b of g) { const p = G.applyH(H, b.cx, b.cy); b.x0 = p[0]; b.y0 = p[1]; }
-      blockInfo[key] = Object.assign({ used, good: gg.length, n: g.length, shift: g.shift }, verifyGrid(g, H, S, rp));
+      g.ok = null;
+      const info = Object.assign({ used, good: gg.length, n: g.length, shift: g.shift }, verifyGrid(g, H, S, rp));
+      g.ok = info.gridOk;
+      return info;
+    };
+
+    // pass 1: every block predicted from the timing bars
+    for (const g of Object.values(groups)) trackGroup(g, b => [b.px, b.py], opt.searchFirst);
+
+    // robust global homography canonical → PF
+    const fitGlobal = list => {
+      let H = G.homographyLS(list.map(b => [b.cx, b.cy]), list.map(b => [b.mx, b.my]));
+      for (let it = 0; it < 2; it++) {
+        const keep = list.filter(b => { const p = G.applyH(H, b.cx, b.cy); return Math.hypot(p[0] - b.mx, p[1] - b.my) < 2.5; });
+        if (keep.length < 8) break;
+        list = keep; H = G.homographyLS(list.map(b => [b.cx, b.cy]), list.map(b => [b.mx, b.my]));
+      }
+      return { H, list };
+    };
+    const med = percentile(bubbles.map(b => b.ring), 0.5);
+    let good = bubbles.filter(b => !b.filledGuess && b.ring > 0.4 * med);
+    if (good.length < 40) return { error: 'จับตำแหน่งวงไม่ได้ (ภาพเบลอหรือมืดเกินไป)' };
+    let fg = fitGlobal(good); let Hg = fg.H; good = fg.list;
+    const blockInfo = {};
+    for (const [key, g] of Object.entries(groups)) blockInfo[key] = finalize(key, g, Hg);
+
+    // pass 2: blocks that failed are re-predicted from the rings of the blocks that passed — they
+    // span the whole sheet, so this homography carries the real perspective (strong tilt, curl)
+    // the timing bars join the fit: they pin x across the whole width while the passing blocks give
+    // the vertical/keystone information; repeat while more blocks pass
+    const barPts = (barsPF || []).map(([c, m]) => ({ cx: c[0], cy: c[1], mx: m[0], my: m[1] }));
+    for (let pass = 2; pass <= 4; pass++) {
+      const okKeys = Object.keys(groups).filter(k => groups[k].ok), badKeys = Object.keys(groups).filter(k => !groups[k].ok);
+      if (!badKeys.length || !okKeys.length) break;
+      const okRings = okKeys.flatMap(k => groups[k].filter(b => !b.filledGuess && b.ring > 0.4 * med));
+      if (okRings.length < 30) break;
+      const Hok = fitGlobal(okRings.concat(barPts)).H;
+      let gained = 0;
+      for (const k of badKeys) {
+        trackGroup(groups[k], b => G.applyH(Hok, b.cx, b.cy), 10, true);
+        blockInfo[k] = Object.assign(finalize(k, groups[k], Hok), { pass });
+        if (groups[k].ok) gained++;
+      }
+      good = bubbles.filter(b => !b.filledGuess && b.ring > 0.4 * med);
+      fg = fitGlobal(good); Hg = fg.H; good = fg.list;
+      if (!gained) break;
     }
+    // if later passes were needed, the first registrations came from a poor prediction: redo every block
+    // from the sheet-wide fit of everything that passed (plus the bars) with a small window, keep improvements
+    if (Object.values(blockInfo).some(v => v.pass)) {
+      const okRings = Object.keys(groups).filter(k => groups[k].ok).flatMap(k => groups[k].filter(b => !b.filledGuess && b.ring > 0.4 * med));
+      if (okRings.length >= 30) {
+        const Hall = fitGlobal(okRings.concat(barPts)).H;
+        for (const [k, g] of Object.entries(groups)) {
+          const before = blockInfo[k], saved = g.map(b => [b.mx, b.my, b.ring, b.filledGuess, b.x0, b.y0]);
+          trackGroup(g, b => G.applyH(Hall, b.cx, b.cy), 6, true);
+          const after = Object.assign(finalize(k, g, Hall), { pass: 'final' });
+          const q = v => (v.gridOk ? 1 : 0) * 1000 + v.weakestLine / Math.max(1, v.ringMed);
+          if (q(after) >= q(before)) blockInfo[k] = after;
+          else { g.forEach((b, i) => { [b.mx, b.my, b.ring, b.filledGuess, b.x0, b.y0] = saved[i]; }); g.ok = before.gridOk; }
+        }
+        good = bubbles.filter(b => !b.filledGuess && b.ring > 0.4 * med);
+        fg = fitGlobal(good); Hg = fg.H; good = fg.list;
+      }
+    }
+    const globalRms = Math.sqrt(good.reduce((s, b) => { const p = G.applyH(Hg, b.cx, b.cy); return s + (p[0] - b.mx) ** 2 + (p[1] - b.my) ** 2; }, 0) / Math.max(1, good.length));
     const bad = Object.entries(blockInfo).filter(([, v]) => !v.gridOk).map(([k]) => k);
     return { bubbles, rp, Hg, globalRms, nGood: good.length, blockInfo, gridError: bad.length ? bad : null };
   }
@@ -394,9 +449,19 @@
       for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) best = Math.max(best, S.ringScore(p[0] + dx, p[1] + dy, rp));
       return best;
     };
-    const real = g.filter(b => !b.filledGuess).map(b => score(b.cx, b.cy));
     const median = arr => percentile(arr, 0.5);
+    const unfilled = g.filter(b => !b.filledGuess);
+    for (const b of unfilled) b.vScore = score(b.cx, b.cy);
+    const real = unfilled.map(b => b.vScore);
     const realMed = median(real);
+    // every row and every column must sit on printed rings: a grid stretched over part of the block
+    // (e.g. its top rows landing on the header) passes the outside test but fails here
+    let weakest = Infinity;
+    for (const key of [rowOf, colOf]) {
+      const lines = {};
+      for (const b of unfilled) (lines[key(b)] = lines[key(b)] || []).push(b.vScore);
+      for (const v of Object.values(lines)) if (v.length >= 2) weakest = Math.min(weakest, median(v));
+    }
     const topRow = g.filter(b => rowOf(b) === r0), leftCol = g.filter(b => colOf(b) === c0), rightCol = g.filter(b => colOf(b) === c1);
     // bottom: one step below the last bubble of every column (handles the 11-row ท–ญ column)
     const bottom = [];
@@ -411,7 +476,7 @@
       right: median(rightCol.map(b => score(b.cx + dxc, b.cy))),
     };
     const worst = Math.max(out.above, out.below, out.left, out.right);
-    return { gridOk: realMed > 0 && worst < 0.55 * realMed, ringMed: +realMed.toFixed(1), outside: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(1)])) };
+    return { gridOk: realMed > 0 && worst < 0.55 * realMed && weakest >= 0.45 * realMed, ringMed: +realMed.toFixed(1), weakestLine: +weakest.toFixed(1), outside: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(1)])) };
   }
 
   /* ---------- 5. read darkness ---------- */
@@ -485,57 +550,175 @@
     return { threshold: T, studentId: readDigits(byField.studentId || []), subjectCode: readDigits(byField.subjectCode || []), answers };
   }
 
+  /* ---------- 1b. timing bars straight from the photo (no paper edges needed) ----------
+   * Used when the paper edges are not usable: paper lying on other sheets, an edge out of frame.
+   * Finds the row of solid dark bars, orders them with the corner square, and returns
+   * full-resolution bar centres with their indexes. */
+  function findBarsInImage(img, tpl) {
+    const { width: W, height: H, data } = img;
+    const N = tpl.anchors.timingTrack.barCount;
+    const f = Math.max(1, Math.round(Math.max(W, H) / 1600));
+    const w = Math.floor(W / f), h = Math.floor(H / f), half = f >> 1;
+    const mx = new Uint8Array(w * h), sat = new Uint8Array(w * h), hist = new Array(256).fill(0);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const o = ((y * f + half) * W + x * f + half) * 4, r = data[o], g = data[o + 1], b = data[o + 2];
+      const hi = Math.max(r, g, b), lo = Math.min(r, g, b);
+      mx[y * w + x] = hi; sat[y * w + x] = hi - lo; hist[hi]++;
+    }
+    let acc = 0, white = 255;
+    for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc >= 0.1 * w * h) { white = i; break; } }
+    const mask = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) mask[i] = mx[i] < 0.5 * white && sat[i] < 50 ? 1 : 0;
+    const { comps } = components(mask, w, h);
+    const solid = comps.filter(c => c.area >= 8 && c.area <= 0.002 * w * h && c.area / (c.w * c.h) > 0.55);
+    const cand = solid.filter(c => { const e = Math.max(c.w, c.h) / Math.min(c.w, c.h); return e >= 1.6 && e <= 5.5; });
+    if (cand.length < 0.6 * N) return { ok: false, found: cand.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${cand.length}/${N} แท่ง) ให้แถบดำทั้งแถวอยู่ในภาพ` };
+
+    // line hypothesis from neighbouring pairs of similar bars; keep the one with most inliers
+    let best = null;
+    for (let i = 0; i < cand.length; i++) {
+      const a = cand[i], Sa = Math.min(a.w, a.h), La = Math.max(a.w, a.h), vert = a.h >= a.w;
+      for (let j = 0; j < cand.length; j++) {
+        if (i === j) continue;
+        const b = cand[j], ra = b.area / a.area; if (ra > 1.6 || ra < 1 / 1.6) continue;
+        const dx = b.cx - a.cx, dy = b.cy - a.cy, d = Math.hypot(dx, dy);
+        if (d < 2 * Sa || d > 5.5 * Sa) continue;
+        const ux = dx / d, uy = dy / d;
+        if (vert ? Math.abs(ux) < 0.8 : Math.abs(uy) < 0.8) continue;
+        const inl = cand.filter(c => { const r = c.area / a.area; return r < 1.8 && r > 1 / 1.8 && Math.abs((c.cx - a.cx) * uy - (c.cy - a.cy) * ux) < 0.5 * La; });
+        if (!best || inl.length > best.inl.length) best = { inl, ux, uy, a };
+      }
+    }
+    if (!best) return { ok: false, found: 0, error: `ไม่เห็นแถบดำขอบล่างกระดาษ ให้แถบดำทั้งแถวอยู่ในภาพ` };
+    // order along the line, keep the longest chain with a regular pitch (one missing bar allowed)
+    let { ux, uy } = best;
+    const t = c => (c.cx - best.a.cx) * ux + (c.cy - best.a.cy) * uy;
+    const sorted = best.inl.slice().sort((p, q) => t(p) - t(q));
+    const gaps = sorted.slice(1).map((c, i) => t(c) - t(sorted[i]));
+    const pitch = percentile(gaps.filter(g => g > 0), 0.5);
+    let chains = [[sorted[0]]];
+    for (let i = 1; i < sorted.length; i++) {
+      const g = gaps[i - 1];
+      if (g < 0.5 * pitch) continue;                 // duplicate fragment
+      if (g > 2.6 * pitch) chains.push([]);          // break
+      chains[chains.length - 1].push(sorted[i]);
+    }
+    let chain = chains.reduce((p, q) => (q.length > p.length ? q : p));
+    if (chain.length < 0.75 * N) return { ok: false, found: chain.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${chain.length}/${N} แท่ง) ให้แถบดำทั้งแถวอยู่ในภาพ` };
+
+    const barLong = percentile(chain.map(c => Math.max(c.w, c.h)), 0.5), barArea = percentile(chain.map(c => c.area), 0.5);
+    const perp = c => (c.cx - chain[0].cx) * -uy + (c.cy - chain[0].cy) * ux; // signed distance from the bar line
+    // corner square: solid, square-ish, ~2× bar area, beside one end of the row
+    const ends = [chain[0], chain[chain.length - 1]];
+    let square = null;
+    for (const c of solid) {
+      const e = Math.max(c.w, c.h) / Math.min(c.w, c.h);
+      if (e > 1.5 || c.area < 1.2 * barArea || c.area > 6 * barArea) continue;
+      const pd = perp(c); if (Math.abs(pd) < 0.7 * barLong || Math.abs(pd) > 3.5 * barLong) continue;
+      for (const [k, E] of ends.entries())
+        if (Math.abs(t(c) - t(E)) < 1.2 * pitch && (!square || Math.abs(pd) < Math.abs(square.pd))) square = { c, pd, end: k };
+    }
+    // "up" (towards the bubbles) = side of the square; without it, the side with more ink
+    let upSign;
+    if (square) upSign = Math.sign(square.pd);
+    else {
+      let pos = 0, neg = 0;
+      for (const c of comps) { const pd = perp(c); if (Math.abs(pd) > barLong && Math.abs(pd) < 15 * barLong) { if (pd > 0) pos += c.area; else neg += c.area; } }
+      upSign = pos > neg ? 1 : -1;
+    }
+    // canonical x runs so that (x, up) has the same handedness as on the sheet: cross(x, up) < 0
+    const upx = -uy * upSign, upy = ux * upSign;
+    if (ux * upy - uy * upx > 0) { ux = -ux; uy = -uy; chain = chain.slice().reverse(); }
+    const tt2 = c => (c.cx - chain[0].cx) * ux + (c.cy - chain[0].cy) * uy;
+    const idx = [0];
+    for (let i = 1; i < chain.length; i++) idx.push(idx[i - 1] + Math.max(1, Math.round((tt2(chain[i]) - tt2(chain[i - 1])) / pitch)));
+    let shift;
+    if (square) {
+      // index of the bar under the square = 0 (the square sits just above bar 0)
+      const tsq = tt2(square.c);
+      shift = -Math.round(tsq / pitch);
+      if (Math.abs(tsq - Math.round(tsq / pitch) * pitch) > 0.45 * pitch) return { ok: false, found: chain.length, error: 'แถบดำขอบล่างไม่ตรงกับสี่เหลี่ยมดำมุม ลองถ่ายใหม่' };
+    } else {
+      if (idx[idx.length - 1] + 1 !== N) return { ok: false, found: chain.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${chain.length}/${N} แท่ง) และไม่เห็นสี่เหลี่ยมดำมุมซ้ายล่าง` };
+      shift = 0;
+    }
+    const bars = [], index = [];
+    chain.forEach((c, i) => { const k = idx[i] + shift; if (k >= 0 && k < N) { bars.push([(c.cx + 0.5) * f, (c.cy + 0.5) * f]); index.push(k); } });
+    if (bars.length < 0.75 * N) return { ok: false, found: bars.length, error: `เห็นแถบดำขอบล่างไม่ครบ (${bars.length}/${N} แท่ง) ให้แถบดำทั้งแถวอยู่ในภาพ` };
+    return { ok: true, bars, index, square: square ? [(square.c.cx + 0.5) * f, (square.c.cy + 0.5) * f] : null };
+  }
+
+  function warpWith(img, Hpf2img, W, H) {
+    return { width: W, height: H, data: G.warpPerspective(img.data, img.width, img.height, Hpf2img, W, H), Hpf2img };
+  }
+
   /* ---------- main ---------- */
   function scanSheet(img, tpl, options) {
     const opt = Object.assign({}, DEFAULTS, options || {});
     const t0 = now(), timing = {};
-    const paper = findPaper(img);
+    const tt = tpl.anchors.timingTrack, Wc = tpl.canonical.width, Hc = tpl.canonical.height, N = tt.barCount;
+    const canonBar = i => [(tt.xStart + (tt.xEnd - tt.xStart) * i / (N - 1)) * Wc, tt.y * Hc];
+
+    // candidate "paper frames" (photo → roughly rectified image), tried in order
+    const frames = [];
+    const paper = opt.coarse === 'bars' ? null : findPaper(img);
+    if (paper) frames.push({ how: 'paper', make: () => warpPaper(img, paper.corners, opt.paperWidth), corners: paper.corners });
+    frames.push({ how: 'bars', make: () => {
+      const ib = findBarsInImage(img, tpl);
+      if (!ib.ok) return ib;
+      // canonical frame with a margin; similarity from the bars in the photo
+      const sim = G.similarityLS(ib.index.map(canonBar), ib.bars), m = 60;
+      return Object.assign(warpWith(img, G.mul3(sim, [1, 0, -m, 0, 1, -m, 0, 0, 1]), Wc + 2 * m, Hc + 2 * m), { imgBars: ib.bars });
+    } });
+    if (paper) frames.push({ how: 'paper180', make: () => warpPaper(img, paper.corners.slice(2).concat(paper.corners.slice(0, 2)), opt.paperWidth), corners: paper.corners });
     timing.paper = now() - t0;
-    if (!paper) return { ok: false, error: 'ไม่พบกระดาษ' };
-    let lastErr = '', lastFound = -1, lastDebug = null;
-    // try upright, then upside-down
-    for (const rot of [0, 2]) {
-      const c = paper.corners.slice(rot).concat(paper.corners.slice(0, rot));
-      const t1 = now();
-      let pf = warpPaper(img, c, opt.paperWidth);
-      timing.warp = now() - t1;
-      const t2 = now();
+
+    let lastErr = '', lastRank = -1;
+    const fail = (rank, msg, extra) => { if (rank >= lastRank) { lastRank = rank; lastErr = msg; lastDebug = extra || lastDebug; } };
+    let lastDebug = null;
+    // one attempt on a paper frame; returns {done: result} or records a failure
+    const attempt = (fr, pf, depth) => {
       let bars = findBars(pf, tpl);
-      timing.bars = now() - t2;
-      if (!bars.ok) { if (!lastErr || (bars.found || 0) > lastFound) { lastErr = bars.error; lastFound = bars.found || 0; } continue; }
-      const tt = tpl.anchors.timingTrack, Wc = tpl.canonical.width, Hc = tpl.canonical.height, N = tt.barCount;
-      const canonOf = b => b.index.map(i => [(tt.xStart + (tt.xEnd - tt.xStart) * i / (N - 1)) * Wc, tt.y * Hc]);
-      let sim = G.similarityLS(canonOf(bars), bars.bars), simScale = Math.hypot(sim[0], sim[3]);
+      if (!bars.ok) { fail(bars.found || 0, bars.error, { imgBars: pf.imgBars, paperCorners: fr.corners }); return null; }
+      let sim = G.similarityLS(bars.index.map(canonBar), bars.bars), simScale = Math.hypot(sim[0], sim[3]);
       const barY = bars.bars.reduce((s, p) => s + p[1], 0) / bars.bars.length;
-      const ky = estimateYScale(pf, tpl, sim, simScale, barY);
+      const ky = depth ? 1 : estimateYScale(pf, tpl, sim, simScale, barY);
       timing.yScale = ky;
       if (Math.abs(ky - 1) > 0.02 && ky > 0.6 && ky < 1.6) {
-        // strong tilt: the paper frame is stretched vertically → re-warp with the measured aspect
-        const pf2 = warpPaper(img, c, opt.paperWidth, null, 1 / ky);
+        // tilt: the frame is stretched/squashed vertically → re-warp with the measured row pitch
+        const pf2 = warpWith(img, G.mul3(pf.Hpf2img, [1, 0, 0, 0, ky, 0, 0, 0, 1]), pf.width, Math.ceil(pf.height / ky));
         const bars2 = findBars(pf2, tpl);
         if (bars2.ok) {
           pf = pf2; bars = bars2;
-          sim = G.similarityLS(canonOf(bars), bars.bars); simScale = Math.hypot(sim[0], sim[3]);
+          sim = G.similarityLS(bars.index.map(canonBar), bars.bars); simScale = Math.hypot(sim[0], sim[3]);
         }
       }
       const t3 = now();
-      const reg = register(pf, tpl, sim, simScale, opt);
-      timing.register = now() - t3;
-      if (reg.error) { lastErr = reg.error; lastFound = Infinity; continue; }
+      const reg = register(pf, tpl, sim, simScale, opt, bars.bars.map((m, i) => [canonBar(bars.index[i]), m]));
+      timing.register = (timing.register || 0) + now() - t3;
+      const toImg = (x, y) => G.applyH(pf.Hpf2img, x, y);
+      const imgBars = bars.bars.map(p => toImg(p[0], p[1]));
+      if (reg.error) { fail(N + 1, reg.error, { imgBars, paperCorners: fr.corners }); return null; }
       if (reg.gridError) {
-        lastErr = 'วางตารางวงไม่แน่ใจ (' + reg.gridError.join(', ') + ') ถือกล้องให้ตรงและให้กระดาษเต็มเฟรมแล้วลองใหม่';
-        lastFound = Infinity; lastDebug = reg.blockInfo; continue;
+        fail(N + 2, 'วางตำแหน่งวงไม่แน่ใจ (' + reg.gridError.join(', ') + ') ถือกล้องให้ตรงขึ้น ให้กระดาษเต็มเฟรม และไม่มีเงาบัง แล้วลองใหม่',
+          { imgBars, paperCorners: fr.corners, blockInfo: reg.blockInfo });
+        // the sheet-wide fit is still good enough to rectify the photo properly: warp again with it
+        // (rings become round and equal-sized everywhere) and register once more
+        if (!depth && reg.nGood >= 150) {
+          const m = 60, Hrect = G.mul3(pf.Hpf2img, G.mul3(reg.Hg, [1, 0, -m, 0, 1, -m, 0, 0, 1]));
+          return attempt(fr, warpWith(img, Hrect, Wc + 2 * m, Hc + 2 * m), 1);
+        }
+        return null;
       }
       const t4 = now();
       readDarkness(pf, reg, opt);
       const res = decide(reg, tpl, opt);
       timing.read = now() - t4;
       timing.total = now() - t0;
-      const toImg = (x, y) => G.applyH(pf.Hpf2img, x, y);
-      return Object.assign({ ok: true, rotated: rot === 2, timing }, res, {
+      return Object.assign({ ok: true, coarse: fr.how + (depth ? '+rectified' : ''), rotated: (() => { const a = toImg(0, 0), b = toImg(100, 0); return b[0] < a[0]; })(), timing }, res, {
         debug: {
-          paperCorners: c, pf: { width: pf.width, height: pf.height }, Hpf2img: pf.Hpf2img,
-          bars: bars.bars.map(p => toImg(p[0], p[1])), fitRms: reg.globalRms, nGood: reg.nGood, blockInfo: reg.blockInfo,
+          paperCorners: fr.corners, pf: { width: pf.width, height: pf.height }, Hpf2img: pf.Hpf2img,
+          bars: imgBars, fitRms: reg.globalRms, nGood: reg.nGood, blockInfo: reg.blockInfo,
           radiusImg: (() => { const a = toImg(pf.width / 2, pf.height / 2), b = toImg(pf.width / 2 + 10, pf.height / 2); return reg.rp * Math.hypot(b[0] - a[0], b[1] - a[1]) / 10; })(),
           bubbles: reg.bubbles.map(b => { const p = toImg(b.x0, b.y0); return { field: b.field, q: b.q, col: b.col, row: b.row, choice: b.choice, x: +p[0].toFixed(1), y: +p[1].toFixed(1), dark: +b.dark.toFixed(3) }; }),
           rp: reg.rp,
@@ -546,10 +729,21 @@
         },
         pf: options && options.keepPF ? pf : undefined,
       });
+    };
+
+    for (const fr of frames) {
+      if (opt.coarse && opt.coarse !== fr.how && !(opt.coarse === 'paper' && fr.how === 'paper180')) continue;
+      const t1 = now();
+      const pf = fr.make();
+      timing.warp = now() - t1;
+      if (pf.ok === false) { fail(pf.found || 0, pf.error); continue; }
+      const r = attempt(fr, pf, 0);
+      if (r) return r;
     }
-    return { ok: false, error: lastErr || 'อ่านไม่ได้', debug: lastDebug ? { blockInfo: lastDebug } : undefined };
+    timing.total = now() - t0;
+    return { ok: false, error: lastErr || 'อ่านไม่ได้', timing, debug: lastDebug || undefined };
   }
 
-  const api = { scanSheet, findPaper, warpPaper, findBars, classify, DEFAULTS, _makeSampler: makeSampler };
+  const api = { scanSheet, findPaper, warpPaper, findBars, findBarsInImage, classify, DEFAULTS, _makeSampler: makeSampler };
   if (isNode) module.exports = api; else root.OMRScan = api;
 })(typeof self !== 'undefined' ? self : this);
